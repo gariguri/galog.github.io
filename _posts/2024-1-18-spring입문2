@@ -1,0 +1,282 @@
+---
+layout: post
+title: "인프런- 스프링 입문 '회고록2'"
+categories:
+  -Blog
+tags:
+  - [Blog, Github, Git] 
+toc: true
+toc_sticky: true
+date: 2024-01-18
+last_modified_at: 2024-01-18
+---
+
+# 인프런-스프링 입문 회고록2 (3.회원 관리 예제~)
+
+## 회원 관리 예제 - 백엔드 개발
+1. 비지니스 요구사항 정리
+    - 데이터: 회원 ID, 이름
+    - 기능: 회원 등록, 회원 조회
+    - 아직 데이터 저장소가 선정되지 않음(가상의 시나리오)-> 인터페잇로 구현 클래스를 변경할 수 있도록 설계
+    - 개발을 진행하기 위해 초기 개발단계에서는 구현체로 가벼운 메모리 기반의 데이터 저장소 사용
+    
+    그림)
+2. 회원 도메인과 repository만들기
+#### 회원 객체
+```java
+package hello.hellospring.domain;
+public class Member{
+    private Long id;
+    private String name;
+
+    public Long getId(){
+        return id;
+    }
+    public void setId(Long id){
+        this.id=id;
+    }
+    public Long getName(){
+        return name;
+    }
+    public void setName(Long name){
+        this.name=name;
+    }
+}
+```
+#### 회원 리포지토리 인터페이스
+```java
+package hello.hellospring.repository;
+
+import hello.hellospring.domain.Member;
+import java.util.List;
+import java.util.Optional;
+
+public interface MemberRepository{
+    Member save(Member member);
+    Optional<Member> findById(Long id);
+    Optional<Member> findByName(String name);
+    List<Member> findAll();
+}
+```
+위 인터페이스를 아래와 같이 구현함.
+#### 회원 리포지토리 메모리 구현체
+```java
+package hello.hellospring.repository;
+import hello.hellospring.domain.Member;
+import java.util.*;
+public class MemoryMemberRepository implements MemberRespository{
+    private static Map<Long, Member> store=new HashMap<>();
+    private static long sequence =0L;
+
+    @Override
+    public Member save(Member member){
+        member.setId(++sequence);
+        store.put(member.getId(), member)
+        return member;
+    }
+    //해당 member에 id를 지정하고, store에 저장함.
+
+    @Override
+    public Optional<Member> findById(Long id) {
+        return Optional.ofNullable(store.get(id));
+    }
+    //id에 해당하는 member을 return(ofNullable을 사용: 결과가 null이라도 오류가 나지 않음)
+    @Override
+    public Optional<Member> findByName(String name) {
+        return store.values().stream()
+                .filter(member->member.getName().equals(name))
+                .findAny();
+    }
+    //member의 name이 name과 같은 조건에 일치하는 element 1개를 반환함.(cf: findFirst()과 비교)
+
+    @Override
+    public List<Member> findAll() {
+        return new ArrayList<>(store.values());
+    }
+    //store에 존재하는 모든 values를 list로 반환함.
+    public void clearStore(){
+        store.clear();
+    }
+    //store을 모두 비움.
+}
+```
+   
+### 회원 repository 테스트 케이스 작성
+- 자바는 JUint 프레임워크로 테스트를 실행함   
+-> 준비하고 실행하는 시간을 단축시켜줌   
+-> 반복 실행 가능   
+-> 여러 테스트 한번에 실행 가능
+
+#### 회원 repository 메모리 구현체 TEST 코드
+src/test/java 하위 폴더에 작성한다.
+```java
+package hello.hellospring.repository;
+import hello.hellospring.domain.Member;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.*;
+class MemoryMemberRepositoryTest {
+    MemoryMemberRepository repository=new MemoryMemberRepository();
+    @AfterEach
+    public void afterEach(){
+        repository.clearStore();
+    }
+    //한번에 여러 테스트를 실행하면, 메모리 DB에 직전 테스트의 결과가 남아있을 수 있으므로, test function을 실행하고 난 후 메모리 DB에 저장된 데이터를 삭제함.
+    @Test
+    public void save(){
+        Member member =new Member();
+        member.setName("spring");
+
+        repository.save(member);
+
+        Member result = repository.findById(member.getId()).get();
+        assertThat(member).isEqualTo(result);
+    }
+    @Test
+    public void findByName(){
+        Member member1=new Member();
+        member1.setName("spring1");
+        repository.save(member1);
+
+        Member member2=new Member();
+        member2.setName("spring2");
+        repository.save(member2);
+
+        Member result=repository.findByName("spring1").get();
+        assertThat(result).isEqualTo(member1);
+    }
+    @Test
+    public void findAll(){
+        Member member1=new Member();
+        member1.setName("spring1");
+        repository.save(member1);
+
+        Member member2=new Member();
+        member2.setName("spring2");
+        repository.save(member2);
+
+        List<Member> result=  repository.findAll();
+        assertThat(result.size()).isEqualTo(2);
+        //저장된 회원수가 같은지 테스트
+    }
+}
+
+```
+#### 테스트는 각각 독립적으로 실행되어야 함.   테스트 순서에 의존관계가 있는 것은 좋은 테스트가 아님!
+
+### 회원 서비스 개발
+```java
+package hello.hellospring.service;
+
+import hello.hellospring.domain.Member;
+import hello.hellospring.repository.MemberRepository;
+import hello.hellospring.repository.MemoryMemberRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Optional;
+//@Transactional
+public class MemberService {
+    //private final MemberRepository memberRepository=new MemoryMemberRepository();
+    //DI 가능하도록 변경---->
+    private final MemberRepository memberRepository;
+
+    public MemberService(MemberRepository memberRepository) {
+        this.memberRepository = memberRepository;
+    }
+    ///////////////////////////////////////////?
+    /**
+     * 회원가입
+     */
+    public Long join(Member member){
+        validateDuplicateMember(member); //중복 회원 검증
+        memberRepository.save(member);
+        return member.getId();
+    }
+    private void validateDuplicateMember(Member member) {
+        memberRepository.findByName(member.getName())
+            .ifPresent(m -> {
+                throw new IllegalStateException("이미 존재하는 회원입니다.");
+            });
+    }
+    /**
+     * 전체 회원조회
+     */
+    public List<Member> findMembers() {
+        return memberRepository.findAll();
+    }
+    public Optional<Member> findOne(Long memberId){
+        return memberRepository.findById(memberId);
+    }
+}
+```
+### 회원 서비스 TEST
+```java
+package hello.hellospring.service;
+
+import hello.hellospring.domain.Member;
+import hello.hellospring.repository.MemberRepository;
+import hello.hellospring.repository.MemoryMemberRepository;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+class MemberServiceTest {
+    MemberService memberService;
+    MemoryMemberRepository memberRepository;
+    //DI
+    @BeforeEach
+    //BeforeEach: 각 테스트 실행전에 호출하여 테스트가 서로 영향이 없도록 항상 새로운 객체를 생성하고, 의존관계를 새로 맺어줌.
+    public void beforeEach(){
+        memberRepository=new MemoryMemberRepository();
+        memberService=new MemberService(memberRepository);
+    }
+    @AfterEach
+    public void afterEach(){
+        memberRepository.clearStore();
+    }
+    //마찬가지로 memory 데이터를 모두 삭제함.
+    @Test
+    void 회원가입() {
+        //given
+        Member member=new Member();
+        member.setName("hello");
+        //when
+        Long saveId=memberService.join(member);
+
+        //then
+        Member findMember = memberService.findOne(saveId).get();
+        assertThat(member.getName()).isEqualTo(findMember.getName());
+        //회원가입한 멤버와 저장된 멤버가 같은지 테스트함.
+    }
+    @Test
+    public void 중복_회원_예외(){
+        //given
+        Member member1=new Member();
+        member1.setName("spring");
+
+        Member member2=new Member();
+        member2.setName("spring");
+
+        //when
+        memberService.join(member1);
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> memberService.join(member2));//예외가 발생해야 한다.
+        assertThat(e.getMessage()).isEqualTo(("이미 존재하는 회원입니다."));
+    }
+}
+```
+
+## 스프링 빈과 의존관계
+- 컴포넌트 스캔과 자동 의존관계 설정
+
+### 회원 컨트롤러에 의존관계 추가
+
+
